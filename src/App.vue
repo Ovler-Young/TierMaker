@@ -40,6 +40,32 @@ const exportScale = ref<number>(4)
 const isDragging = ref(false) // 全局拖动状态
 const tierListRef = ref<InstanceType<typeof TierList> | null>(null)
 const configModalKey = ref<number>(0) // 用于强制重新渲染 ConfigModal
+const topPanelRef = ref<HTMLElement | null>(null)
+const bottomPanelRef = ref<HTMLElement | null>(null)
+const dividerRef = ref<HTMLElement | null>(null)
+const tierListScalerRef = ref<HTMLElement | null>(null)
+const topPanelFlex = ref(1)
+const bottomPanelFlex = ref(1)
+const isResizing = ref(false)
+const topPanelHeight = ref(0)
+const tierListNaturalHeight = ref(0)
+
+// 计算缩放比例：面板高度 / 内容自然高度
+const tierListScale = computed(() => {
+  if (tierListNaturalHeight.value <= 0 || topPanelHeight.value <= 0) return 1
+  return Math.min(1, topPanelHeight.value / tierListNaturalHeight.value)
+})
+
+// 缩放样式：等比缩放 + 宽度补偿（让内容填满面板宽度）
+const tierListScaleStyle = computed(() => {
+  const s = tierListScale.value
+  if (s >= 1) return {}
+  return {
+    transform: `scale(${s})`,
+    transformOrigin: 'top left',
+    width: `${100 / s}%`,
+  }
+})
 
 // 检测重复的条目（根据ID）
 const duplicateItemIds = computed(() => {
@@ -232,9 +258,80 @@ onMounted(async () => {
   await saveTierData([...tiers.value, ...unrankedTiers.value])
 })
 
-// 清理事件监听
+// 可拖拽分隔条逻辑
+function handleDividerPointerDown(e: PointerEvent) {
+  e.preventDefault()
+  isResizing.value = true
+
+  const topPanel = topPanelRef.value
+  const bottomPanel = bottomPanelRef.value
+  if (!topPanel || !bottomPanel) return
+
+  const startY = e.clientY
+  const startTopHeight = topPanel.getBoundingClientRect().height
+  const startBottomHeight = bottomPanel.getBoundingClientRect().height
+  const totalHeight = startTopHeight + startBottomHeight
+
+  const target = e.target as HTMLElement
+  target.setPointerCapture(e.pointerId)
+
+  function onPointerMove(ev: PointerEvent) {
+    const delta = ev.clientY - startY
+    let newTopHeight = startTopHeight + delta
+    let newBottomHeight = startBottomHeight - delta
+
+    const minHeight = 80
+    if (newTopHeight < minHeight) {
+      newTopHeight = minHeight
+      newBottomHeight = totalHeight - minHeight
+    }
+    if (newBottomHeight < minHeight) {
+      newBottomHeight = minHeight
+      newTopHeight = totalHeight - minHeight
+    }
+
+    topPanelFlex.value = newTopHeight / totalHeight
+    bottomPanelFlex.value = newBottomHeight / totalHeight
+  }
+
+  function onPointerUp() {
+    isResizing.value = false
+    target.removeEventListener('pointermove', onPointerMove)
+    target.removeEventListener('pointerup', onPointerUp)
+  }
+
+  target.addEventListener('pointermove', onPointerMove)
+  target.addEventListener('pointerup', onPointerUp)
+}
+
+// ResizeObservers 用于实时计算缩放比例
+let topPanelObserver: ResizeObserver | null = null
+let scalerObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  nextTick(() => {
+    // 监听上方面板的可用高度
+    if (topPanelRef.value) {
+      topPanelObserver = new ResizeObserver((entries) => {
+        topPanelHeight.value = entries[0].contentRect.height
+      })
+      topPanelObserver.observe(topPanelRef.value)
+    }
+    // 监听 tier list 内容的自然高度
+    if (tierListScalerRef.value) {
+      scalerObserver = new ResizeObserver(() => {
+        if (tierListScalerRef.value) {
+          tierListNaturalHeight.value = tierListScalerRef.value.scrollHeight
+        }
+      })
+      scalerObserver.observe(tierListScalerRef.value)
+    }
+  })
+})
+
 onUnmounted(() => {
-  // No cleanup needed for export modal
+  topPanelObserver?.disconnect()
+  scalerObserver?.disconnect()
 })
 
 // 监听数据变化，自动保存
@@ -932,45 +1029,55 @@ function handleFileImport(e: Event) {
       </div>
     </header>
 
-    <TierList
-      ref="tierListRef"
-      :tiers="tiers"
-      :tier-configs="tierConfigs"
-      :is-dragging="isDragging"
-      :is-exporting-image="false"
-      :duplicate-item-ids="duplicateItemIds"
-      :hide-item-names="hideItemNames"
-      @add-item="handleAddItem"
-      @add-row="handleAddRow"
-      @delete-row="handleDeleteRow"
-      @delete-item="handleDeleteItem"
-      @edit-item="handleEditItem"
-      @move-item="handleMoveItem"
-      @reorder="handleReorder"
-      @drag-start="isDragging = true"
-      @drag-end="isDragging = false"
-    />
+    <div class="tier-panel-top" ref="topPanelRef" :style="{ flex: topPanelFlex }">
+      <div class="tier-list-scaler" ref="tierListScalerRef" :style="tierListScaleStyle">
+        <TierList
+          ref="tierListRef"
+          :tiers="tiers"
+          :tier-configs="tierConfigs"
+          :is-dragging="isDragging"
+          :is-exporting-image="false"
+          :duplicate-item-ids="duplicateItemIds"
+          :hide-item-names="hideItemNames"
+          @add-item="handleAddItem"
+          @add-row="handleAddRow"
+          @delete-row="handleDeleteRow"
+          @delete-item="handleDeleteItem"
+          @edit-item="handleEditItem"
+          @move-item="handleMoveItem"
+          @reorder="handleReorder"
+          @drag-start="isDragging = true"
+          @drag-end="isDragging = false"
+        />
+      </div>
+    </div>
 
-    <div class="divider"></div>
+    <div
+      class="divider"
+      ref="dividerRef"
+      @pointerdown="handleDividerPointerDown"
+    ></div>
 
-    <TierList
-      :tiers="unrankedTiers"
-      :tier-configs="[{ id: 'unranked', label: '', color: 'transparent', order: 9999 }]"
-      :is-dragging="isDragging"
-      :is-exporting-image="false"
-      :duplicate-item-ids="duplicateItemIds"
-      :hide-item-names="hideItemNames"
-      :hide-tier-labels="true"
-      @add-item="handleAddItem"
-      @add-row="handleAddRow"
-      @delete-row="handleDeleteRow"
-      @delete-item="handleDeleteItem"
-      @edit-item="handleEditItem"
-      @move-item="handleMoveItem"
-      @reorder="handleReorder"
-      @drag-start="isDragging = true"
-      @drag-end="isDragging = false"
-    />
+    <div class="tier-panel-bottom" ref="bottomPanelRef" :style="{ flex: bottomPanelFlex }">
+      <TierList
+        :tiers="unrankedTiers"
+        :tier-configs="[{ id: 'unranked', label: '', color: 'transparent', order: 9999 }]"
+        :is-dragging="isDragging"
+        :is-exporting-image="false"
+        :duplicate-item-ids="duplicateItemIds"
+        :hide-item-names="hideItemNames"
+        :hide-tier-labels="true"
+        @add-item="handleAddItem"
+        @add-row="handleAddRow"
+        @delete-row="handleDeleteRow"
+        @delete-item="handleDeleteItem"
+        @edit-item="handleEditItem"
+        @move-item="handleMoveItem"
+        @reorder="handleReorder"
+        @drag-start="isDragging = true"
+        @drag-end="isDragging = false"
+      />
+    </div>
 
 
 
@@ -1046,27 +1153,54 @@ function handleFileImport(e: Event) {
 </template>
 
 <style scoped>
-.divider {
-  height: 4px;
-  background-color: var(--text-color);
-  margin: 0;
-  border-radius: 2px;
-  width: 100%;
-}
-
 .app {
   max-width: var(--size-app-max-width, 1400px);
   margin: 0 auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tier-panel-top {
+  flex: 1;
+  overflow: hidden;
+  min-height: 80px;
+}
+
+.tier-list-scaler {
+  width: 100%;
+}
+
+.tier-panel-bottom {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 80px;
+}
+
+.divider {
+  height: 8px;
+  background-color: var(--border-color);
+  cursor: row-resize;
+  flex-shrink: 0;
+  position: relative;
+  user-select: none;
+  touch-action: none;
+}
+
+.divider:hover,
+.divider:active {
+  background-color: var(--text-color);
 }
 
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  align-items: center;
   margin-bottom: 0;
   border-bottom: var(--size-border-width-thick, 2px) solid var(--border-color);
   position: relative;
+  flex-shrink: 0;
 }
 
 .header-left {

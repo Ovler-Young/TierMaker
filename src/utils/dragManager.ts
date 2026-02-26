@@ -78,23 +78,70 @@ export function getIsDragging(): boolean {
 }
 
 /**
+ * 计算元素在视口中的可见矩形（裁剪到所有 overflow 祖先的范围内）
+ * 用于解决容器实际 rect 超出可滚动面板可视区的问题
+ */
+function getVisibleRect(el: HTMLElement): DOMRect {
+    let top = -Infinity
+    let bottom = Infinity
+    let left = -Infinity
+    let right = Infinity
+
+    let parent = el.parentElement
+    while (parent && parent !== document.documentElement) {
+        const style = window.getComputedStyle(parent)
+        const oy = style.overflowY
+        const ox = style.overflowX
+        if (oy === 'auto' || oy === 'scroll' || oy === 'hidden' ||
+            ox === 'auto' || ox === 'scroll' || ox === 'hidden') {
+            const pr = parent.getBoundingClientRect()
+            if (oy === 'auto' || oy === 'scroll' || oy === 'hidden') {
+                top = Math.max(top, pr.top)
+                bottom = Math.min(bottom, pr.bottom)
+            }
+            if (ox === 'auto' || ox === 'scroll' || ox === 'hidden') {
+                left = Math.max(left, pr.left)
+                right = Math.min(right, pr.right)
+            }
+        }
+        parent = parent.parentElement
+    }
+
+    const rect = el.getBoundingClientRect()
+    const clampedTop = top === -Infinity ? rect.top : Math.max(rect.top, top)
+    const clampedBottom = bottom === Infinity ? rect.bottom : Math.min(rect.bottom, bottom)
+    const clampedLeft = left === -Infinity ? rect.left : Math.max(rect.left, left)
+    const clampedRight = right === Infinity ? rect.right : Math.min(rect.right, right)
+
+    return new DOMRect(
+        clampedLeft,
+        clampedTop,
+        Math.max(0, clampedRight - clampedLeft),
+        Math.max(0, clampedBottom - clampedTop)
+    )
+}
+
+/**
  * 构建容器信息（简化版，不需要预计算所有 item 位置）
  */
 function buildContainerInfo(ignoredEl: HTMLElement | null): {
     container: HTMLElement;
     containerRect: DOMRect;
+    visibleRect: DOMRect;
     itemCount: number;
     items: Element[];
 }[] {
     const infos: {
         container: HTMLElement;
         containerRect: DOMRect;
+        visibleRect: DOMRect;
         itemCount: number;
         items: Element[];
     }[] = []
 
     for (const container of containers.values()) {
         const containerRect = container.getBoundingClientRect()
+        const visibleRect = getVisibleRect(container)
         // 过滤子元素
         const children = Array.from(container.children).filter(child =>
             child !== ignoredEl &&
@@ -104,7 +151,7 @@ function buildContainerInfo(ignoredEl: HTMLElement | null): {
             !child.classList.contains('empty')
         )
 
-        infos.push({ container, containerRect, itemCount: children.length, items: children })
+        infos.push({ container, containerRect, visibleRect, itemCount: children.length, items: children })
     }
 
     return infos
@@ -121,21 +168,19 @@ function findNearestGridPosition(
     const infos = buildContainerInfo(ignoredEl)
     if (infos.length === 0) return null
 
-    // 1. 找到目标容器
-    // 优先找鼠标所在的容器
+    // 1. 找到目标容器：用 visibleRect 做命中检测，避免超出滚动面板的容器误判
     let targetContainerData = infos.find(info =>
-        mouseX >= info.containerRect.left &&
-        mouseX <= info.containerRect.right &&
-        mouseY >= info.containerRect.top &&
-        mouseY <= info.containerRect.bottom
+        mouseX >= info.visibleRect.left &&
+        mouseX <= info.visibleRect.right &&
+        mouseY >= info.visibleRect.top &&
+        mouseY <= info.visibleRect.bottom
     )
 
-    // 如果鼠标不在任何容器内，找垂直距离最近的容器 (Y轴)
+    // 如果鼠标不在任何容器内，找垂直距离最近的容器（基于 visibleRect）
     if (!targetContainerData) {
         let minDistance = Infinity
         for (const info of infos) {
-            // 计算垂直距离
-            const dist = Math.max(info.containerRect.top - mouseY, 0, mouseY - info.containerRect.bottom)
+            const dist = Math.max(info.visibleRect.top - mouseY, 0, mouseY - info.visibleRect.bottom)
             if (dist < minDistance) {
                 minDistance = dist
                 targetContainerData = info
@@ -147,72 +192,54 @@ function findNearestGridPosition(
 
     const { container, containerRect, items } = targetContainerData
 
-    // 2. 获取配置参数
+    // 2. 获取配置参数（作为后备值）
     const config = getConfig()
-    // const n = config.sizes['items-per-row'] || 5 // Config removed
-    const itemWidth = config.sizes['item-width'] || 100
-    const itemHeight = config.sizes['item-height'] || 173
+    let actualItemWidth = config.sizes['item-width'] || 100
+    let actualItemHeight = config.sizes['item-height'] || 173
+    let actualGap = config.sizes['row-gap'] ?? 10
+    let actualPaddingLeft = config.sizes['row-padding'] ?? 10
+    let actualPaddingTop = config.sizes['container-padding-top'] ?? 10
+
+    // 优先从 DOM 测量实际视觉尺寸（兼容 CSS transform: scale）
+    if (items.length > 0) {
+        const firstRect = items[0].getBoundingClientRect()
+        actualItemWidth = firstRect.width
+        actualItemHeight = firstRect.height
+
+        // 从第一个 item 相对容器的位置推算 padding
+        actualPaddingLeft = firstRect.left - containerRect.left
+        actualPaddingTop = firstRect.top - containerRect.top
+
+        // 从相邻 item 推算 gap
+        if (items.length >= 2) {
+            const secondRect = items[1].getBoundingClientRect()
+            // 确保在同一行
+            if (Math.abs(secondRect.top - firstRect.top) < actualItemHeight * 0.5) {
+                actualGap = secondRect.left - firstRect.right
+            }
+        }
+    }
 
     // Dynamic N calculation
-    // Available width for items = Container Width - Padding Left - Padding Right
-    // In CSS Flexbox with gap: 
-    // Total Width >= n * itemWidth + (n-1) * gap
-    // Total Width >= n * (itemWidth + gap) - gap
-    // Total Width + gap >= n * (itemWidth + gap)
-    // n = floor( (Width + gap) / (itemWidth + gap) )
-    const gap = config.sizes['row-gap'] ?? 10
-    const paddingLeft = config.sizes['row-padding'] ?? 10
-    const paddingRight = config.sizes['row-padding'] ?? 10
-    const paddingTop = config.sizes['container-padding-top'] ?? 10
-
     const containerWidth = containerRect.width
-    const availableWidth = containerWidth - paddingLeft - paddingRight
+    const availableWidth = containerWidth - actualPaddingLeft * 2
 
-    // Safety check to avoid division by zero
-    const stride = itemWidth + gap
+    const stride = actualItemWidth + actualGap
     let n = 1
     if (stride > 0) {
-        // Use rounding to avoid floating point issues near boundaries? 
-        // Math.floor is correct for fitting items.
-        // Add a tiny epsilon to availableWidth just in case of sub-pixel issues? No, keep it strict.
-        n = Math.floor((availableWidth + gap) / stride)
+        n = Math.floor((availableWidth + actualGap) / stride)
     }
-    if (n < 1) n = 1 // At least 1 item per row
-
-    // 注意：itemHeight 可能不是固定的，如果 hide-name，这里简单起见先取 configs
-    // 更准确的方式是取 items[0] 的 height，或者 config value
-    // 考虑到 hide-name，最好是从 DOM 获取第一个 item 的高度 (如果存在)
-    let actualItemHeight = itemHeight
-    if (items.length > 0) {
-        actualItemHeight = items[0].getBoundingClientRect().height
-    } else {
-        // 尝试检查是否是 hide-name 模式 (从 class)
-        // 暂时用 config default
-        const hideNameHeight = config.sizes['item-height-hide-name'] || 133
-        // 简单 heuristic: 看看 container 里面有没有 .hide-name 的元素? 或者 container parent?
-        // 先默认用 config.item-height
-    }
+    if (n < 1) n = 1
 
     // 3. 计算 (i, j)
-    const relX = mouseX - containerRect.left - paddingLeft
-    const relY = mouseY - containerRect.top - paddingTop
+    const relX = mouseX - containerRect.left - actualPaddingLeft
+    const relY = mouseY - containerRect.top - actualPaddingTop
 
-    // 列可以限制在 0 ~ n-1
-    // j = floor(relX / (w + gap))
-    // 修正：items 的放置是：item gap item gap ...
-    // X coordinate starts at 0. Item occupies [0, w]. Next item starts at w + gap.
-    // Interval stride is w + gap.
-    let j = Math.floor(relX / (itemWidth + gap))
-
-    // 修正边界: 如果鼠标在 gap 中间，算前一个还是后一个？
-    // 严格来说，drop 在 gap 中间偏左算左，偏右算右。
-    // 但是这里网格是从左往右填充。
-    // 简单处理：clamp j
+    let j = Math.floor(relX / (actualItemWidth + actualGap))
     if (j < 0) j = 0
     if (j >= n) j = n - 1
 
-    // 行 i
-    let i = Math.floor(relY / (actualItemHeight + gap))
+    let i = Math.floor(relY / (actualItemHeight + actualGap))
     if (i < 0) i = 0
 
     // 计算目标索引
@@ -288,8 +315,8 @@ function initRealDrag() {
     placeholderEl.style.pointerEvents = 'none'
     placeholderEl.style.transform = ''
     placeholderEl.style.transition = ''
-    placeholderEl.style.width = `${rect.width}px`
-    placeholderEl.style.height = `${rect.height}px`
+    // 不设置显式 width/height，让 CSS 控制尺寸
+    // 避免在有 CSS transform: scale() 的容器中出现双重缩放
     placeholderEl.style.margin = window.getComputedStyle(item).margin
 
     item.parentNode?.insertBefore(placeholderEl, item)
