@@ -28,6 +28,7 @@ const emit = defineEmits<{
 const isExportingImage = ref(false)
 const isExportingPDF = ref(false)
 const exportProgress = ref('')
+const exportItemsPerRow = ref(0) // 0 = 自动
 
 // 获取当前主题对应的背景色
 function getCurrentThemeBackgroundColor(): string {
@@ -310,7 +311,7 @@ async function handleExportImage() {
     } catch (e) {
       console.warn('获取标题字体大小失败，使用默认值32px:', e)
     }
-    configureExportStyles(hiddenContainer, { titleFontSize: computedTitleFontSize, originalAppWidth })
+    configureExportStyles(hiddenContainer, { titleFontSize: computedTitleFontSize, originalAppWidth, itemsPerRow: exportItemsPerRow.value || undefined })
 
     exportProgress.value = t('export.generatingImage')
     const canvas = await html2canvas(clonedNode, {
@@ -443,7 +444,7 @@ async function handleExportPDF() {
     await processExportImages(hiddenContainer, currentScale, cropImageWithCanvas, getCorsProxyUrl, applySmartCropToImage, 'pdf')
     
     const originalAppWidth = originalNode.offsetWidth || originalNode.scrollWidth
-    configureExportStyles(hiddenContainer, { titleFontSize: props.titleFontSize, originalAppWidth })
+    configureExportStyles(hiddenContainer, { titleFontSize: props.titleFontSize, originalAppWidth, itemsPerRow: exportItemsPerRow.value || undefined })
 
     exportProgress.value = t('export.generatingPDF')
     const canvas = await html2canvas(clonedNode, {
@@ -570,7 +571,22 @@ const isExporting = computed(() => isExportingImage.value || isExportingPDF.valu
       
       <div class="modal-body">
         <p class="description">{{ t('export.selectFormat') }}</p>
-        
+
+        <div class="export-setting">
+          <label class="setting-label">{{ t('export.itemsPerRow') }}</label>
+          <div class="setting-control">
+            <input
+              type="number"
+              class="setting-input"
+              v-model.number="exportItemsPerRow"
+              min="0"
+              max="50"
+              :placeholder="t('export.itemsPerRowAuto')"
+            />
+            <span class="setting-hint">{{ exportItemsPerRow > 0 ? exportItemsPerRow + t('export.itemsPerRowUnit') : t('export.itemsPerRowAuto') }}</span>
+          </div>
+        </div>
+
         <div class="export-options">
           <button 
             class="export-option" 
@@ -673,6 +689,39 @@ const isExporting = computed(() => isExportingImage.value || isExportingPDF.valu
   color: var(--text-color);
   margin: 0;
   font-weight: bold;
+}
+
+.export-setting {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.setting-label {
+  font-weight: bold;
+  color: var(--text-color);
+  white-space: nowrap;
+}
+
+.setting-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-input {
+  width: 70px;
+  padding: 6px 8px;
+  border: 2px solid var(--border-color);
+  background: var(--bg-color);
+  color: var(--text-color);
+  font-size: 14px;
+  text-align: center;
+}
+
+.setting-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .export-options {

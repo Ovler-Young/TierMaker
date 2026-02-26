@@ -37,7 +37,10 @@
         "exportPDFFailed": "PDF export failed: ",
         "exportJsonFailed": "Export failed, please try again",
         "cannotFindContent": "Cannot find content to export",
-        "imageFailed": "Failed to generate image"
+        "imageFailed": "Failed to generate image",
+        "itemsPerRow": "Items per row",
+        "itemsPerRowAuto": "Auto",
+        "itemsPerRowUnit": " per row"
     },
     "import": {
         "title": "Import Data",

@@ -183,9 +183,10 @@ export function configureExportStyles(
     options: {
         titleFontSize: number
         originalAppWidth: number
+        itemsPerRow?: number
     }
 ): void {
-    const { titleFontSize, originalAppWidth } = options
+    const { titleFontSize, originalAppWidth, itemsPerRow } = options
 
     // 确保 Header 样式正确
     const header = root.querySelector('.header') as HTMLElement
@@ -216,13 +217,57 @@ export function configureExportStyles(
         clonedTierList.style.paddingTop = '0'
     }
 
-    // Tight 模式：移除所有留白
+    // 重置上方面板：移除 overflow:hidden 和 flex 限制，让内容自然撑开
+    const topPanel = root.querySelector('.tier-panel-top') as HTMLElement
+    if (topPanel) {
+        topPanel.style.flex = 'none'
+        topPanel.style.overflow = 'visible'
+        topPanel.style.height = 'auto'
+        topPanel.style.minHeight = '0'
+    }
+
+    // 重置 scaler：移除缩放 transform，以全尺寸导出
+    const scaler = root.querySelector('.tier-list-scaler') as HTMLElement
+    if (scaler) {
+        scaler.style.transform = 'none'
+        scaler.style.width = '100%'
+    }
+
+    // Tight 模式：移除所有留白；重置 app 的高度约束
     const clonedApp = root.querySelector('.app') as HTMLElement
     if (clonedApp) {
         clonedApp.style.padding = '0'
         clonedApp.style.margin = '0'
         clonedApp.style.width = `${originalAppWidth}px`
         clonedApp.style.maxWidth = `${originalAppWidth}px`
+        clonedApp.style.height = 'auto'
+        clonedApp.style.overflow = 'visible'
+    }
+
+    // 每行番数：固定 .tier-row 宽度，使内容按指定列数换行
+    if (itemsPerRow && itemsPerRow > 0) {
+        const itemWidth = Number(getSize('item-width')) || 100
+        const gap = Number(getSize('row-gap')) || 10
+        const padding = Number(getSize('row-padding')) || 10
+        const rowWidth = itemsPerRow * itemWidth + (itemsPerRow - 1) * gap + 2 * padding
+
+        root.querySelectorAll('.tier-row').forEach((el) => {
+            const row = el as HTMLElement
+            row.style.width = `${rowWidth}px`
+            row.style.flex = 'none'
+        })
+
+        // 获取标签列宽度（从 inline style 或实测宽度）
+        const labelEl = root.querySelector('.tier-label') as HTMLElement
+        const labelWidth = labelEl
+            ? (parseFloat(labelEl.style.width) || labelEl.offsetWidth || Number(getSize('label-min-width')) || 80)
+            : 0
+
+        const exportAppWidth = labelWidth + rowWidth
+        if (clonedApp) {
+            clonedApp.style.width = `${exportAppWidth}px`
+            clonedApp.style.maxWidth = `${exportAppWidth}px`
+        }
     }
 }
 
@@ -264,20 +309,14 @@ export function hideExportUIElements(
 
     // 隐藏无等级列表和分割线
     if (hideUnranked) {
-        const dividers = root.querySelectorAll('.divider')
-        if (dividers.length > 0) {
-            const lastDivider = dividers[dividers.length - 1] as HTMLElement
-            lastDivider.style.display = 'none'
-
-            let nextEl = lastDivider.nextElementSibling
-            while (nextEl) {
-                if (nextEl.classList.contains('tier-list')) {
-                    (nextEl as HTMLElement).style.display = 'none'
-                    break
-                }
-                nextEl = nextEl.nextElementSibling
-            }
+        // 新布局：直接隐藏底部面板和分隔条
+        const bottomPanel = root.querySelector('.tier-panel-bottom') as HTMLElement
+        if (bottomPanel) {
+            bottomPanel.style.display = 'none'
         }
+        root.querySelectorAll('.divider').forEach((el) => {
+            (el as HTMLElement).style.display = 'none'
+        })
     }
 }
 

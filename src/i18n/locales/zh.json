@@ -37,7 +37,10 @@
         "exportPDFFailed": "导出PDF失败：",
         "exportJsonFailed": "导出失败，请重试",
         "cannotFindContent": "无法找到要导出的内容",
-        "imageFailed": "生成图片失败"
+        "imageFailed": "生成图片失败",
+        "itemsPerRow": "每行番数",
+        "itemsPerRowAuto": "自动",
+        "itemsPerRowUnit": " 个/行"
     },
     "import": {
         "title": "导入数据",
