@@ -327,25 +327,16 @@ async function handleExportImage() {
     window.scrollTo(originalScrollX, originalScrollY)
     
     exportProgress.value = t('export.downloading')
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        alert('生成图片失败')
-        isExportingImage.value = false
-        exportProgress.value = ''
-        return
-      }
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `tier-list-${new Date().toISOString().split('T')[0]}.jpg`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      isExportingImage.value = false
-      exportProgress.value = ''
-      emit('close')
-    }, 'image/jpeg', 0.9)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
+    const a = document.createElement('a')
+    a.href = dataUrl
+    a.download = `tier-list-${new Date().toISOString().split('T')[0]}.jpg`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    isExportingImage.value = false
+    exportProgress.value = ''
+    emit('close')
     
   } catch (error) {
     console.error('导出图片失败:', error)

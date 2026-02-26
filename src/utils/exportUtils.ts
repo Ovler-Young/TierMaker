@@ -250,6 +250,8 @@ export function configureExportStyles(
             clonedApp.style.width = `${exportAppWidth}px`
             clonedApp.style.maxWidth = `${exportAppWidth}px`
         }
+        // 同步收窄容器宽度，避免 html2canvas 按旧宽度渲染出多余空白
+        root.style.width = `${exportAppWidth}px`
     }
 }
 
