@@ -1194,20 +1194,20 @@ function handleFileImport(e: Event) {
 }
 
 .header {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   margin-bottom: 0;
   border-bottom: var(--size-border-width-thick, 2px) solid var(--border-color);
-  position: relative;
   flex-shrink: 0;
 }
 
 .header-left {
-  flex: 1;
+  grid-column: 1;
 }
 
 .title {
+  grid-column: 2;
   font-weight: bold;
   color: var(--text-color);
   letter-spacing: 2px;
@@ -1215,11 +1215,10 @@ function handleFileImport(e: Event) {
   outline: none;
   transition: opacity 0.2s;
   text-align: center;
-  flex: 1;
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  width: fit-content;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .title:hover {
@@ -1232,7 +1231,9 @@ function handleFileImport(e: Event) {
 }
 
 .header-actions {
+  grid-column: 3;
   display: flex;
+  justify-content: flex-end;
   gap: 10px;
 }
 
